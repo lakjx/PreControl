@@ -1,0 +1,23 @@
+{
+    "armo-rm-attributes": [
+        "helpsteer-helpfulness",
+        "helpsteer-correctness",
+        "helpsteer-coherence",
+        "helpsteer-complexity",
+        "helpsteer-verbosity",
+        "ultrafeedback-overall_score",
+        "ultrafeedback-instruction_following",
+        "ultrafeedback-truthfulness",
+        "ultrafeedback-honesty",
+        "ultrafeedback-helpfulness",
+        "beavertails-is_safe",
+        "prometheus-score",
+        "argilla-overall_quality",
+        "argilla-judge_lm",
+        "code-complexity",
+        "code-style",
+        "code-explanation",
+        "code-instruction-following",
+        "code-readability"
+    ]
+}

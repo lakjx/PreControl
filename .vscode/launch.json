@@ -1,0 +1,41 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug: get_activations_only",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "accelerate.commands.launch",
+            "args": [
+                // "--num_processes", "1",
+                "--main_process_port",
+                "29508",
+                "src/get_activations_only.py",
+                "--model_name",
+                "phi-4-mini-it",
+                "--dataset_name",
+                "HelpSteer2",
+                "--num_samples",
+                "1",
+                "--output_path",
+                "./data/value_function_features/HelpSteer2/ns=1/temp=0.0/phi-4-mini-it",
+                "--hf_cache_dir",
+                "./cache",
+                "--max_prompt_tokens",
+                "2048",
+                "--max_new_tokens",
+                "1024",
+                "--batch_size",
+                "48",
+                "--temperature",
+                "0.0"
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7",
+                "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+    ]
+}
