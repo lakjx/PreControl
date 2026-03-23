@@ -238,13 +238,11 @@ def get_llm_activations(
         local_mask_list.append(mask.cpu())
 
         it.set_postfix({'|prompt|': s.i(input_ids.shape[1]), '#generated-token': f'{s.i(len(hidden_states))}/{s.i(max_new_tokens)}'})
-
-        # Clean up large GPU tensors to free memory for the next iteration
+        
         del outputs, hidden_states, input_ids, attention_mask
         if 'range_tensor' in locals(): del range_tensor
         if 'thresholds' in locals(): del thresholds
         if 'mask' in locals(): del mask
-
     # print(f"Process {accelerator.process_index} start saving")
 
     max_length = max(len(hidden) for hidden in local_hidden_activations)
@@ -276,8 +274,32 @@ def get_llm_activations(
     all_gather_object(gathered_masks, mask)
 
     all_responses = list(chain.from_iterable(gathered_responses))
-    all_hidden    = torch.cat(gathered_hidden, dim=0)
-    all_masks     = torch.cat(gathered_masks, dim=0)
+    # all_hidden    = torch.cat(gathered_hidden, dim=0)
+    # all_masks     = torch.cat(gathered_masks, dim=0)
+
+    global_max_length = max(t.shape[1] for t in gathered_hidden)
+
+    # 对 hidden_states 进行全局 padding 对齐
+    padded_gathered_hidden = []
+    for t in gathered_hidden:
+        pad_len = global_max_length - t.shape[1]
+        # F.pad 从最后往前推: (pad_last_dim_left, pad_last_dim_right, pad_second_last_left, pad_second_last_right)
+        # 我们要给 seq_len (倒数第二维) 的右边 padding
+        padded_t = F.pad(t, (0, 0, 0, pad_len), value=0.0) 
+        padded_gathered_hidden.append(padded_t)
+    
+    all_hidden = torch.cat(padded_gathered_hidden, dim=0)
+
+    # 对 masks 进行同样的全局 padding 对齐
+    # t 的形状是 [batch_size, seq_len]
+    padded_gathered_masks = []
+    for t in gathered_masks:
+        pad_len = global_max_length - t.shape[1]
+        # mask 是 2D 张量，只需对倒数第一维 (seq_len) 右边 pad
+        padded_t = F.pad(t, (0, pad_len), value=0.0)
+        padded_gathered_masks.append(padded_t)
+        
+    all_masks = torch.cat(padded_gathered_masks, dim=0)
 
     if accelerator.is_main_process:
         torch.save(all_hidden, os_join(base_output_path, f'token_wise_activations_{mode}.pth'))

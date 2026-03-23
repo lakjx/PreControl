@@ -17,12 +17,12 @@ bsz=48
 n_new=1024
 
 gpus="0,1,2,3,4,5,6,7"
-num_processes=1
+num_processes=8
+out_dir="${base_dir}/data/value_function_features/${dataset_name}/ns=${num_samples}/temp=${temperature}/${llm}"
 
 
 PYTHONPATH=$PYTHONPATH:$(pwd) \
 CUDA_VISIBLE_DEVICES=$gpus \
-out_dir="${base_dir}/data/value_function_features/${dataset_name}/ns=${num_samples}/temp=${temperature}/${llm}"
 accelerate launch --num_processes ${num_processes} --main_process_port 29508 src/get_activations_only.py \
     --model_name "$llm" \
     --dataset_name "$dataset_name" \
