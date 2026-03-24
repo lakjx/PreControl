@@ -259,49 +259,77 @@ def get_llm_activations(
 
     
     torch.cuda.empty_cache()
+
+    import shutil
+    import gc
+    
+    # Save local results to disk to avoid CPU OOM during all_gather
+    local_tmp_dir = os_join(base_output_path, f"tmp_{mode}_{accelerator.process_index}")
+    os.makedirs(local_tmp_dir, exist_ok=True)
+    
+    torch.save(local_hidden_activations, os_join(local_tmp_dir, 'hidden.pth'))
+    torch.save(mask, os_join(local_tmp_dir, 'mask.pth'))
+    with open(os_join(local_tmp_dir, 'responses.json'), 'w') as f:
+        json.dump(local_responses, f, ensure_ascii=False)
+        
+    # Free local memory before waiting
+    del local_hidden_activations
+    del mask
+    del local_responses
+    gc.collect()
+
     accelerator.wait_for_everyone()
 
-    world_size = accelerator.num_processes
-
-    gathered_responses = [None] * world_size
-    all_gather_object(gathered_responses, local_responses)
-
-    gloo_group = torch.distributed.new_group(backend="gloo")
-    gathered_hidden = [None] * world_size
-    all_gather_object(gathered_hidden, local_hidden_activations, group=gloo_group)
-
-    gathered_masks = [None] * world_size
-    all_gather_object(gathered_masks, mask)
-
-    all_responses = list(chain.from_iterable(gathered_responses))
-    # all_hidden    = torch.cat(gathered_hidden, dim=0)
-    # all_masks     = torch.cat(gathered_masks, dim=0)
-
-    global_max_length = max(t.shape[1] for t in gathered_hidden)
-
-    # 对 hidden_states 进行全局 padding 对齐
-    padded_gathered_hidden = []
-    for t in gathered_hidden:
-        pad_len = global_max_length - t.shape[1]
-        # F.pad 从最后往前推: (pad_last_dim_left, pad_last_dim_right, pad_second_last_left, pad_second_last_right)
-        # 我们要给 seq_len (倒数第二维) 的右边 padding
-        padded_t = F.pad(t, (0, 0, 0, pad_len), value=0.0) 
-        padded_gathered_hidden.append(padded_t)
-    
-    all_hidden = torch.cat(padded_gathered_hidden, dim=0)
-
-    # 对 masks 进行同样的全局 padding 对齐
-    # t 的形状是 [batch_size, seq_len]
-    padded_gathered_masks = []
-    for t in gathered_masks:
-        pad_len = global_max_length - t.shape[1]
-        # mask 是 2D 张量，只需对倒数第一维 (seq_len) 右边 pad
-        padded_t = F.pad(t, (0, pad_len), value=0.0)
-        padded_gathered_masks.append(padded_t)
-        
-    all_masks = torch.cat(padded_gathered_masks, dim=0)
-
     if accelerator.is_main_process:
+        total_samples = 0
+        global_max_length = 0
+        hidden_dim = 0
+        dtype = None
+        
+        # First pass: determine global shapes
+        for i in range(accelerator.num_processes):
+            tmp_dir = os_join(base_output_path, f"tmp_{mode}_{i}")
+            h = torch.load(os_join(tmp_dir, 'hidden.pth'), map_location='cpu')
+            global_max_length = max(global_max_length, h.shape[1])
+            total_samples += h.shape[0]
+            hidden_dim = h.shape[2]
+            dtype = h.dtype
+            del h
+        
+        # Pre-allocate large tensors
+        all_hidden = torch.zeros((total_samples, global_max_length, hidden_dim), dtype=dtype)
+        all_masks = None
+        all_responses = []
+        
+        current_idx = 0
+        for i in range(accelerator.num_processes):
+            tmp_dir = os_join(base_output_path, f"tmp_{mode}_{i}")
+            
+            # Load and append responses
+            with open(os_join(tmp_dir, 'responses.json'), 'r') as f:
+                all_responses.extend(json.load(f))
+                
+            # Load and pad hidden states
+            h = torch.load(os_join(tmp_dir, 'hidden.pth'), map_location='cpu')
+            pad_len = global_max_length - h.shape[1]
+            n_samples = h.shape[0]
+            if pad_len > 0:
+                h = F.pad(h, (0, 0, 0, pad_len), value=0.0)
+            all_hidden[current_idx:current_idx+n_samples] = h
+            del h
+            
+            # Load and pad masks
+            m = torch.load(os_join(tmp_dir, 'mask.pth'), map_location='cpu')
+            if all_masks is None:
+                all_masks = torch.zeros((total_samples, global_max_length), dtype=m.dtype)
+            if pad_len > 0:
+                m = F.pad(m, (0, pad_len), value=0.0)
+            all_masks[current_idx:current_idx+n_samples] = m
+            del m
+            
+            current_idx += n_samples
+            
+        # Save final merged results
         torch.save(all_hidden, os_join(base_output_path, f'token_wise_activations_{mode}.pth'))
         time.sleep(1)
         torch.save(all_masks, os_join(base_output_path, f'mask_{mode}.pth'))
@@ -309,6 +337,13 @@ def get_llm_activations(
         with open(os_join(base_output_path, f'response_{mode}.jsonl'), 'w') as f:
             for res in all_responses:
                 f.write(json.dumps(res, ensure_ascii=False) + '\n')
+                
+        # Cleanup temporary files
+        for i in range(accelerator.num_processes):
+            shutil.rmtree(os_join(base_output_path, f"tmp_{mode}_{i}"))
+
+    # Need to wait again to make sure main_process finishes cleanup before we exit this function
+    accelerator.wait_for_everyone()
 
 
 def main():

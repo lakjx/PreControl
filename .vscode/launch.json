@@ -33,7 +33,9 @@
             ],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7",
-                "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
+                "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}",
+                "ACCELERATE_DEBUG_MODE": "1",
+                "TORCH_DISTRIBUTED_DEBUG": "DETAIL"
             },
             "console": "integratedTerminal",
             "justMyCode": false

@@ -139,7 +139,7 @@ venv.bak/
 # Spyder project settings
 .spyderproject
 .spyproject
-
+*.pdf
 # Rope project settings
 .ropeproject
 
