@@ -3,6 +3,9 @@ Evaluate controllability: generate responses at varying alpha strengths,
 score with ArmoRM, compute correlation with alpha direction.
 Includes BASE MODEL (no router) as mandatory baseline.
 """
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torch
 import argparse
 import json
