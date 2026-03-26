@@ -49,11 +49,11 @@ def build_pairs(ds, gen_tokenizer, max_prompt_tokens=1024):
         rows_b = dataset.select(odd_indices)
 
         # Vectorized prompt matching & filtering via .map()
-        def process_pair(example_a, idx):
+        def process_pair(example_a, idx, split_name):
             example_b = rows_b[idx]
             if example_a['prompt'] != example_b['prompt']:
                 return {'valid': False, 'prompt_msgs': '', 'prompt_raw': '',
-                        'response_a': '', 'response_b': ''}
+                        'response_a': '', 'response_b': '', 'split_name': split_name}
 
             prompt_msgs = helpsteer2_prompt2messages(example_a['prompt'])
 
@@ -61,7 +61,7 @@ def build_pairs(ds, gen_tokenizer, max_prompt_tokens=1024):
             prompt_tokens = gen_tokenizer.apply_chat_template(prompt_msgs, add_generation_prompt=True)
             if len(prompt_tokens) > max_prompt_tokens:
                 return {'valid': False, 'prompt_msgs': '', 'prompt_raw': '',
-                        'response_a': '', 'response_b': ''}
+                        'response_a': '', 'response_b': '', 'split_name': split_name}
 
             return {
                 'valid': True,
@@ -69,9 +69,10 @@ def build_pairs(ds, gen_tokenizer, max_prompt_tokens=1024):
                 'prompt_raw': example_a['prompt'],
                 'response_a': example_a['response'],
                 'response_b': example_b['response'],
+                'split_name': split_name
             }
 
-        processed = rows_a.map(process_pair, with_indices=True, num_proc=4,
+        processed = rows_a.map(process_pair, with_indices=True, fn_kwargs={"split_name": split}, num_proc=4,
                                remove_columns=rows_a.column_names)
         processed = processed.filter(lambda x: x['valid'], num_proc=4)
 
@@ -81,6 +82,7 @@ def build_pairs(ds, gen_tokenizer, max_prompt_tokens=1024):
                 'prompt_raw': row['prompt_raw'],
                 'response_a': row['response_a'],
                 'response_b': row['response_b'],
+                'split': row['split_name'],
             })
 
     return all_pairs
@@ -121,6 +123,10 @@ def score_batch(messages_list, model, tokenizer):
 
 
 def normalize_alpha(alpha_raw):
+    # Truncate negative values to 0. If the chosen response is worse
+    # than the rejected on a specific attribute, we don't 'punish' that attribute negatively,
+    # we just ignore it (set to 0) to avoid confusing the router's directionality.
+    alpha_raw = torch.clamp(alpha_raw, min=0.0)
     norm = torch.norm(alpha_raw, p=2, dim=-1, keepdim=True).clamp(min=1e-8)
     return alpha_raw / norm
 
@@ -221,6 +227,7 @@ def main():
                 "alpha_raw": alpha_raw.tolist(),
                 "alpha": alpha_norm.tolist(),
                 "attr_names": ATTR_NAMES,
+                "split": meta[j]['split'],
             })
 
     # ── Gather all records to main process ──
@@ -237,11 +244,21 @@ def main():
             merged.extend(records)
 
         os.makedirs(os.path.dirname(args.output_path) or '.', exist_ok=True)
-        with open(args.output_path, 'w', encoding='utf-8') as f:
+        train_path = args.output_path.replace('.jsonl', '_train.jsonl')
+        val_path = args.output_path.replace('.jsonl', '_val.jsonl')
+        
+        train_cnt, val_cnt = 0, 0
+        with open(train_path, 'w', encoding='utf-8') as f_train, open(val_path, 'w', encoding='utf-8') as f_val:
             for rec in merged:
-                f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+                split = rec.pop('split', 'train')
+                if 'val' in split.lower():
+                    f_val.write(json.dumps(rec, ensure_ascii=False) + '\n')
+                    val_cnt += 1
+                else:
+                    f_train.write(json.dumps(rec, ensure_ascii=False) + '\n')
+                    train_cnt += 1
 
-        print(f"Done! Wrote {len(merged)} preference pairs to {args.output_path}")
+        print(f"Done! Wrote {train_cnt} train pairs to {train_path}, and {val_cnt} val pairs to {val_path}")
 
     accelerator.wait_for_everyone()
 

@@ -162,7 +162,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, default='microsoft/Phi-4-mini-instruct')
     parser.add_argument('--cache_dir', type=str, default='./cache')
-    parser.add_argument('--data_path', type=str, default='data/helpsteer2_prefs_2attr.jsonl')
+    parser.add_argument('--data_path_train', type=str, default='data/helpsteer2_prefs_2attr_train.jsonl')
+    parser.add_argument('--data_path_val', type=str, default='data/helpsteer2_prefs_2attr_val.jsonl')
     parser.add_argument('--output_dir', type=str, default='checkpoints/preference_router')
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=1e-3)
@@ -172,7 +173,6 @@ def main():
     parser.add_argument('--num_attributes', type=int, default=2)
     parser.add_argument('--grad_clip', type=float, default=1.0)
     parser.add_argument('--patience', type=int, default=5)
-    parser.add_argument('--val_ratio', type=float, default=0.1)
     parser.add_argument('--rank', type=int, default=32)
     parser.add_argument('--layer_idx', type=int, default=-2)
     parser.add_argument('--max_samples', type=int, default=0, help='0 = use all')
@@ -208,19 +208,14 @@ def main():
     model = PreferenceModelWrapper(base_model, router, layer_idx=args.layer_idx)
     optimizer = torch.optim.AdamW(model.router.parameters(), lr=args.lr, weight_decay=0.01)
 
-    # ── Load & split data ──
-    all_data = load_data(args.data_path, max_samples=args.max_samples if args.max_samples > 0 else None)
-    if accelerator.is_main_process:
-        logger.info(f"Loaded {len(all_data)} preference pairs.")
-    if len(all_data) == 0:
-        raise RuntimeError(f"No data at {args.data_path}")
-
-    n_val = max(1, int(len(all_data) * args.val_ratio))
-    n_train = len(all_data) - n_val
-    torch.manual_seed(args.seed)
-    perm = torch.randperm(len(all_data)).tolist()
-    train_data = [all_data[i] for i in perm[:n_train]]
-    val_data   = [all_data[i] for i in perm[n_train:]]
+    # ── Load data ──
+    train_data = load_data(args.data_path_train, max_samples=args.max_samples if args.max_samples > 0 else None)
+    val_data = load_data(args.data_path_val, max_samples=args.max_samples if args.max_samples > 0 else None)
+    
+    if len(train_data) == 0:
+        raise RuntimeError(f"No train data at {args.data_path_train}")
+    if len(val_data) == 0:
+        raise RuntimeError(f"No val data at {args.data_path_val}")
 
     train_dataset = PreferencePairDataset(train_data)
     val_dataset   = PreferencePairDataset(val_data)
@@ -259,6 +254,12 @@ def main():
             accelerator.backward(loss)
             if args.grad_clip > 0:
                 accelerator.clip_grad_norm_(model.router.parameters(), max_norm=args.grad_clip)
+            
+            # Print grad norm for the very first step to ensure gradients are flowing
+            if train_count == 0 and accelerator.is_main_process:
+                total_grad_norm = sum(p.grad.norm().item() ** 2 for p in model.router.parameters() if p.grad is not None) ** 0.5
+                logger.info(f"First step grad norm: {total_grad_norm:.6f}")
+                
             optimizer.step()
 
             for k, v in metrics.items():

@@ -47,7 +47,7 @@ def main():
     parser.add_argument('--model_name', type=str, default='microsoft/Phi-4-mini-instruct')
     parser.add_argument('--cache_dir', type=str, default='/home/zj-xz/data_trx/pre-control/cache')
     parser.add_argument('--checkpoint', type=str, default='checkpoints/preference_router/best_router.pth')
-    parser.add_argument('--data_path', type=str, default='data/helpsteer2_prefs_2attr.jsonl')
+    parser.add_argument('--data_path', type=str, default='data/helpsteer2_prefs_2attr_val.jsonl')
     parser.add_argument('--output_path', type=str, default='data/controllability_results.json')
     parser.add_argument('--n_prompts', type=int, default=20)
     parser.add_argument('--max_new_tokens', type=int, default=200)

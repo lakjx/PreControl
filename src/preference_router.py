@@ -22,13 +22,16 @@ class PreferenceRouter(nn.Module):
         self.reset_parameters()
         
     def reset_parameters(self):
-        # Init A like LoRA (Kaiming uniform)
+        # Init A and B with standard Kaiming (not zero!)
+        # If B is zero AND W is zero, gradients flowing to W are strictly zero
+        # because dL/dW = dL/dh * B * A(h). If B=0, dW=0 forever!
         nn.init.kaiming_uniform_(self.A.weight, a=math.sqrt(5))
-        # Init B as zero so initial editing is identity (like LoRA)
-        nn.init.zeros_(self.B.weight)
-        # Init W as ZEROS so router starts from no-edit state
-        # This ensures ortho loss starts at 0 and grows naturally
-        nn.init.zeros_(self.W)
+        nn.init.kaiming_uniform_(self.B.weight, a=math.sqrt(5))
+        
+        # Init W with tiny random noise near zero
+        # This keeps the initial edit small (identity behavior initially)
+        # but prevents zero-gradient deadlock and allows W to grow
+        nn.init.normal_(self.W, mean=0.0, std=1e-4)
 
     def forward(self, h: torch.Tensor, alphas: torch.Tensor) -> torch.Tensor:
         """
