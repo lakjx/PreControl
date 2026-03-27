@@ -2,6 +2,27 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Debugger: prepare_pref",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "accelerate.commands.launch",
+            "args": [
+                "--num_processes",
+                "4",
+                "--main_process_port",
+                "29508",
+                "src/prepare_preference_data.py"
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1,2,7",
+                "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}",
+                "ACCELERATE_DEBUG_MODE": "1",
+                "TORCH_DISTRIBUTED_DEBUG": "DETAIL"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "Debug: get_activations_only",
             "type": "debugpy",
             "request": "launch",

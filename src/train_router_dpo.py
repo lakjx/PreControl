@@ -10,7 +10,7 @@ Usage:
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,7"
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
@@ -168,11 +168,11 @@ def main():
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--beta', type=float, default=0.1,  help='DPO temperature')
-    parser.add_argument('--lambda_ortho', type=float, default=0.01)
+    parser.add_argument('--lambda_ortho', type=float, default=0.03)
     parser.add_argument('--lambda_l2', type=float, default=0.01)
     parser.add_argument('--num_attributes', type=int, default=2)
     parser.add_argument('--grad_clip', type=float, default=1.0)
-    parser.add_argument('--patience', type=int, default=5)
+    parser.add_argument('--patience', type=int, default=10)
     parser.add_argument('--rank', type=int, default=32)
     parser.add_argument('--layer_idx', type=int, default=-2)
     parser.add_argument('--max_samples', type=int, default=0, help='0 = use all')
@@ -193,11 +193,11 @@ def main():
     # Only the router is trainable and synced across GPUs.
     if accelerator.is_main_process:
         logger.info(f"Loading {args.model_name}...")
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir=args.cache_dir)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir=args.cache_dir, local_files_only=True)
     tokenizer.pad_token = tokenizer.eos_token
 
     base_model = AutoModelForCausalLM.from_pretrained(
-        args.model_name, cache_dir=args.cache_dir, torch_dtype=torch.bfloat16
+        args.model_name, cache_dir=args.cache_dir, torch_dtype=torch.bfloat16, local_files_only=True
     ).to(device)
     base_model.eval()
 

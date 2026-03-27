@@ -74,7 +74,7 @@ def build_pairs(ds, gen_tokenizer, max_prompt_tokens=1024):
 
         processed = rows_a.map(process_pair, with_indices=True, fn_kwargs={"split_name": split}, num_proc=4,
                                remove_columns=rows_a.column_names)
-        processed = processed.filter(lambda x: x['valid'], num_proc=4)
+        processed = processed.filter(lambda x: x['valid'], num_proc=1)
 
         for row in processed:
             all_pairs.append({
@@ -135,9 +135,10 @@ def normalize_alpha(alpha_raw):
 # Main
 # ──────────────────────────────────────────────────
 def main():
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,7"
     parser = argparse.ArgumentParser()
     parser.add_argument('--output_path', type=str, default='data/helpsteer2_prefs_2attr.jsonl')
-    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--max_prompt_tokens', type=int, default=1024)
     parser.add_argument('--hf_cache_dir', type=str, default='./cache')
     args = parser.parse_args()
@@ -149,13 +150,23 @@ def main():
     if accelerator.is_main_process:
         print(f"Loading {rm_name}...")
 
-    rm_tokenizer = AutoTokenizer.from_pretrained(rm_name, use_fast=True, cache_dir=args.hf_cache_dir)
+    rm_tokenizer = AutoTokenizer.from_pretrained(
+        rm_name, 
+        use_fast=True, 
+        cache_dir=args.hf_cache_dir, 
+        local_files_only=True
+    )
     rm_tokenizer.pad_token = rm_tokenizer.eos_token
     rm_tokenizer.pad_token_id = rm_tokenizer.eos_token_id
 
     rm_model = AutoModelForSequenceClassification.from_pretrained(
-        rm_name, trust_remote_code=True, torch_dtype=torch.bfloat16, cache_dir=args.hf_cache_dir
+        rm_name, 
+        trust_remote_code=True, 
+        torch_dtype=torch.bfloat16, 
+        cache_dir=args.hf_cache_dir,
+        local_files_only=True
     )
+    rm_model.config.pad_token_id = rm_tokenizer.pad_token_id
     rm_model.eval()
 
     # ── Build pairs on main process, then broadcast ──
@@ -163,7 +174,7 @@ def main():
         print("Loading HelpSteer2 & building pairs...")
         ds = load_dataset("nvidia/HelpSteer2", cache_dir=args.hf_cache_dir)
         gen_tokenizer = AutoTokenizer.from_pretrained(
-            "microsoft/Phi-4-mini-instruct", cache_dir=args.hf_cache_dir
+            "microsoft/Phi-4-mini-instruct", cache_dir=args.hf_cache_dir, local_files_only=True
         )
         if gen_tokenizer.pad_token is None:
             gen_tokenizer.pad_token = gen_tokenizer.eos_token
